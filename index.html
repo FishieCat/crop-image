@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Image Cropper</title>
+  <style>
+    html, body {
+      margin: 0; padding: 0; height: 100%; overflow: hidden;
+      font-family: sans-serif;
+    }
+		#info {
+			position: absolute;
+			width: 50vw;
+			height: 50vh;
+			top: 25vh;
+			left: 25vw;
+			display: flex;
+			justify-content: center;
+			align-items: center;
+			text-align: center;
+			background: rgba(0,0,0,0.6);
+			color: white;
+			font-size: 1.5em;
+			cursor: pointer;
+			z-index: 10;
+		}
+
+    #canvas {
+      display: block;
+      position: fixed;
+      top: 0; left: 0;
+      width: 100%;
+      height: 100%;
+      background-repeat: repeat;
+    }
+    #topBar, #bottomBar {
+      position: fixed;
+      left: 50%;
+      transform: translateX(-50%);
+      display: none;
+      gap: 0.5em;
+      padding: 0.5em;
+      z-index: 5;
+    }
+    #topBar { top: 0; }
+    #bottomBar { bottom: 0; }
+    button {
+      padding: 0.5em 1em;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <div id="info">Click to open file picker or drag &amp; drop or copy-paste image</div>
+  <canvas id="canvas"></canvas>
+  <div id="topBar">
+    <button onclick="setBg('transparent')">Transparent</button>
+    <button onclick="setBg('white')">White</button>
+    <button onclick="setBg('black')">Black</button>
+  </div>
+  <div id="bottomBar">
+    <button onclick="download('webp')">Download .webp</button>
+    <button onclick="download('png')">Download .png</button>
+    <button onclick="download('jpg')">Download .jpg</button>
+    <button onclick="clearCanvas()">Clear</button>
+  </div>
+  <input type="file" id="fileInput" accept="image/*" style="display:none" />
+  <script>
+    const info = document.getElementById('info');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const fileInput = document.getElementById('fileInput');
+    const topBar = document.getElementById('topBar');
+    const bottomBar = document.getElementById('bottomBar');
+
+    let image = null;
+    let imgX = 0, imgY = 0, imgW = 0, imgH = 0;
+    let cropBox = { x: 0, y: 0, w: 0, h: 0 };
+    let dragging = false, resizing = false, dragOffset = {}, resizeDir = null;
+    let backgroundMode = 'transparent';
+    let checkerPattern = null;
+
+    function setCanvasSize() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+    }
+
+    function createCheckerboardPattern() {
+      const patternCanvas = document.createElement('canvas');
+      patternCanvas.width = patternCanvas.height = 20;
+      const pctx = patternCanvas.getContext('2d');
+      pctx.fillStyle = '#ccc';
+      pctx.fillRect(0, 0, 20, 20);
+      pctx.fillStyle = '#eee';
+      pctx.fillRect(0, 0, 10, 10);
+      pctx.fillRect(10, 10, 10, 10);
+      return ctx.createPattern(patternCanvas, 'repeat');
+    }
+
+    function loadImage(src) {
+      const img = new Image();
+      img.onload = () => {
+        image = img;
+        const padding = 50;
+        const scale = Math.min(
+          (canvas.width - padding * 2) / img.width,
+          (canvas.height - padding * 2) / img.height,
+          1
+        );
+        imgW = img.width * scale;
+        imgH = img.height * scale;
+        imgX = (canvas.width - imgW) / 2;
+        imgY = (canvas.height - imgH) / 2;
+        const cropW = Math.max(imgW * 0.8, 100);
+				const cropH = Math.max(imgH * 0.8, 100);
+				cropBox = {
+					w: cropW,
+					h: cropH,
+					x: imgX + (imgW - cropW) / 2,
+					y: imgY + (imgH - cropH) / 2
+				};
+        info.style.display = 'none';
+        topBar.style.display = 'flex';
+        bottomBar.style.display = 'flex';
+        draw();
+      };
+      img.src = src;
+    }
+
+    function draw() {
+      if (backgroundMode === 'transparent') {
+        if (!checkerPattern) checkerPattern = createCheckerboardPattern();
+        ctx.fillStyle = checkerPattern;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+      } else {
+        ctx.fillStyle = backgroundMode;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+      }
+
+	if (!image) return;
+	ctx.drawImage(image, imgX, imgY, imgW, imgH);
+	// Darken area outside the crop box
+
+
+	ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+	ctx.beginPath();
+	ctx.rect(0, 0, canvas.width, canvas.height);
+	ctx.rect(cropBox.x, cropBox.y, cropBox.w, cropBox.h);
+	ctx.fill('evenodd');
+	ctx.restore();
+	
+		// Blue and yellow dashes just outside the crop area
+	const pad = 1; // how far outside the box (half line width)
+	const x = cropBox.x - pad;
+	const y = cropBox.y - pad;
+	const w = cropBox.w + 2 * pad;
+	const h = cropBox.h + 2 * pad;
+
+	// Yellow pass (first, offset dash)
+	ctx.save();
+	ctx.strokeStyle = '#fbb040';
+	ctx.setLineDash([6, 4]);
+	ctx.lineWidth = 2;
+	ctx.lineDashOffset = 6;
+	ctx.strokeRect(x, y, w, h);
+	ctx.restore();
+
+	// Blue pass
+	ctx.save();
+	ctx.strokeStyle = '#07576d';
+	ctx.setLineDash([6, 4]);
+	ctx.lineWidth = 2;
+	ctx.strokeRect(x, y, w, h);
+	ctx.restore();
+	
+	ctx.strokeStyle = '#00f';
+	ctx.setLineDash([6, 4]);
+	ctx.lineWidth = 1;
+	ctx.strokeRect(cropBox.x, cropBox.y, cropBox.w, cropBox.h);
+	ctx.restore();
+    }
+
+    function setBg(mode) {
+      backgroundMode = mode;
+      draw();
+    }
+
+    function download(format) {
+      const crop = document.createElement('canvas');
+      crop.width = cropBox.w;
+      crop.height = cropBox.h;
+      const cctx = crop.getContext('2d');
+
+		// Fill background
+		if (backgroundMode === 'transparent' && format !== 'jpg') {
+		  cctx.clearRect(0, 0, crop.width, crop.height);
+		} else {
+		  cctx.fillStyle = backgroundMode === 'transparent' ? '#fff' : backgroundMode;
+		  cctx.fillRect(0, 0, crop.width, crop.height);
+		}
+
+      // Draw image only (no overlay)
+      // Compute image-to-canvas transform
+		const scaleX = imgW / image.width;
+		const scaleY = imgH / image.height;
+		const sx = (cropBox.x - imgX) / scaleX;
+		const sy = (cropBox.y - imgY) / scaleY;
+		const sw = cropBox.w / scaleX;
+		const sh = cropBox.h / scaleY;
+
+		cctx.drawImage(
+		  image,
+		  sx, sy, sw, sh,
+		  0, 0, cropBox.w, cropBox.h
+		);
+
+      crop.toBlob(blob => {
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = `cropped.${format}`;
+        link.click();
+      }, format === 'jpg' ? 'image/jpeg' : `image/${format}`);
+    }
+
+    function clearCanvas() {
+      image = null;
+      info.style.display = 'flex';
+      topBar.style.display = 'none';
+      bottomBar.style.display = 'none';
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      setBg('transparent');
+    }
+
+    function pointInBox(x, y, box) {
+      return x >= box.x && x <= box.x + box.w && y >= box.y && y <= box.y + box.h;
+    }
+
+		function getResizeHandle(x, y) {
+			const edgeSize = 6;
+			const withinX = x >= cropBox.x && x <= cropBox.x + cropBox.w;
+			const withinY = y >= cropBox.y && y <= cropBox.y + cropBox.h;
+
+			const onLeft   = Math.abs(x - cropBox.x) <= edgeSize && withinY;
+			const onRight  = Math.abs(x - (cropBox.x + cropBox.w)) <= edgeSize && withinY;
+			const onTop    = Math.abs(y - cropBox.y) <= edgeSize && withinX;
+			const onBottom = Math.abs(y - (cropBox.y + cropBox.h)) <= edgeSize && withinX;
+
+			let dir = '';
+			if (onTop) dir += 'n';
+			if (onBottom) dir += 's';
+			if (onLeft) dir += 'w';
+			if (onRight) dir += 'e';
+
+			return dir || null;
+		}
+
+
+    function updateCursor(e) {
+      const { offsetX: x, offsetY: y } = e;
+      const dir = getResizeHandle(x, y);
+      if (dir) {
+        canvas.style.cursor = dir + '-resize';
+      } else if (pointInBox(x, y, cropBox)) {
+        canvas.style.cursor = 'move';
+      } else {
+        canvas.style.cursor = 'default';
+      }
+    }
+
+    canvas.addEventListener('mousedown', e => {
+      const { offsetX: x, offsetY: y } = e;
+      const dir = getResizeHandle(x, y);
+      if (dir) {
+        resizing = true;
+        resizeDir = dir;
+      } else if (pointInBox(x, y, cropBox)) {
+        dragging = true;
+        dragOffset.x = x - cropBox.x;
+        dragOffset.y = y - cropBox.y;
+      }
+    });
+
+    canvas.addEventListener('mousemove', e => {
+      updateCursor(e);
+      const { offsetX: x, offsetY: y } = e;
+      if (dragging) {
+        cropBox.x = x - dragOffset.x;
+        cropBox.y = y - dragOffset.y;
+        draw();
+      } else if (resizing) {
+        let min = 10;
+        let dx = x - cropBox.x;
+        let dy = y - cropBox.y;
+        if (resizeDir.includes('e')) cropBox.w = Math.max(min, dx);
+        if (resizeDir.includes('s')) cropBox.h = Math.max(min, dy);
+        if (resizeDir.includes('w')) {
+          const nx = x;
+          cropBox.w += cropBox.x - nx;
+          cropBox.x = nx;
+        }
+        if (resizeDir.includes('n')) {
+          const ny = y;
+          cropBox.h += cropBox.y - ny;
+          cropBox.y = ny;
+        }
+        draw();
+      }
+    });
+
+    canvas.addEventListener('mouseup', () => { dragging = resizing = false; });
+    canvas.addEventListener('mouseleave', () => { dragging = resizing = false; });
+
+    info.addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', e => {
+      const file = e.target.files[0];
+      if (file) loadImage(URL.createObjectURL(file));
+    });
+
+    window.addEventListener('resize', () => {
+      setCanvasSize();
+      if (image) draw();
+    });
+
+    window.addEventListener('paste', e => {
+      const item = [...e.clipboardData.items].find(i => i.type.startsWith('image'));
+      if (item) loadImage(URL.createObjectURL(item.getAsFile()));
+    });
+
+    window.addEventListener('dragover', e => e.preventDefault());
+    window.addEventListener('drop', e => {
+      e.preventDefault();
+      const file = [...e.dataTransfer.files].find(f => f.type.startsWith('image'));
+      if (file) loadImage(URL.createObjectURL(file));
+    });
+
+    setCanvasSize();
+    checkerPattern = createCheckerboardPattern();
+    draw();
+  </script>
+</body>
+</html>
